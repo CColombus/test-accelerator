@@ -28,7 +28,7 @@ hs_err_pid*
 .ionide
 
 # build output
-target/
+target/*
 
 # End of https://www.toptal.com/developers/gitignore/api/scala,visualstudiocode
 .vscode/settings.json
