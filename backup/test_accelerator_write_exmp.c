@@ -13,11 +13,10 @@
 // 	return value;
 // }
 
-static inline void accum_write( void *ptrLoad, void *ptrStore, int idx)
+static inline void accum_write(int idx, void *ptr)
 {
     asm volatile("fence");
-    // ROCC_INSTRUCTION_SS(0, (uintptr_t)ptrLoad, (uintptr_t)ptrStore, 1);
-    ROCC_INSTRUCTION_SS(0, (uintptr_t)ptrLoad, idx, 2);
+    ROCC_INSTRUCTION_SS(0, (uintptr_t)ptr, idx, 2);
     asm volatile("fence");
 }
 
@@ -35,27 +34,24 @@ static inline void accum_write( void *ptrLoad, void *ptrStore, int idx)
 
 // unsigned long data = 0x3421L;
 // int data1 = 12;
-volatile long data = 15;
-volatile long result = 0;
+volatile long data[10] = {12, 34, 56, 78, 23, 45, 89, 21, 32, 11};
 
 int main(void)
 {
 
-    printf("Testing write operation. R1\n");
+    printf("Testing write operation\n");
 
-    printf("DEBUG: data[0] at %ld\n", (long)&data);
-    printf("DEBUG: result at %ld\n", (long)&result);
+    for (int i = 0; i < 10; i++) {
+        accum_write(i % 4, (void *)&data[i]);
+        printf("Wrote data[%d]: %ld address at %ld\n", i, data[i], (long)&data[i]);
+    }
 
-    accum_write((void *)&data, (void *)&result, 2);
+    // printf("Data written to accelerator.\n");
 
-    printf("Got result: %ld at %ld\n", result, (long)&result);
-
-    // accum_write((void *)&data, (void *)&result, 2);
-
-    printf("done\n");
-
-    // printf("Read from result: %ld address at %ld\n", result, (long)&result);
-
+    // print out the data to verify
+    for (int i = 0; i < 10; i++) {
+        printf("Read data[%d]: %ld address at %ld\n", i, data[i], (long)&data[i]);
+    }
 
     // // int result;
 

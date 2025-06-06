@@ -19,8 +19,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
 
   // Define FSM states
   object FSMstate extends ChiselEnum {
-    val IDLE, READ_REQ_SETUP, READ_REQ_FIRE, READ_REQ_RESP, STORE_REQ_SETUP, STORE_REQ_FIRE, STORE_REQ_RESP,
-        INST_COMPLETE = Value
+    val IDLE, READ_REQ_SETUP, READ_REQ_WAIT, READ_REQ_FIRE, READ_REQ_RESP, INST_COMPLETE = Value
   }
 
   import FSMstate._
@@ -37,32 +36,24 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   val doAccum = funct === 2.U // load from register file
 
   // datapath
-  val rgPtr   = cmdQueue.bits.rs1 // pointer to the location in memory
-  val rgWrPtr = cmdQueue.bits.rs2 // pointer to the write location in memory
+  val rgPtr = cmdQueue.bits.rs1 // pointer to the location in memory
 
   val memRespTag = io.mem.resp.bits.tag(3, 0) // tag for the memory response
 
   val reqAddr = Reg(UInt(32.W))
   val reqTag  = Reg(UInt(4.W)) // or whatever width you need
   val reqData = Reg(UInt(32.W))
-  val reqCmd  = RegInit(M_XRD) // default command is read
+
+  val testReg = RegInit(318.asUInt(30.W))
 
   val state = RegInit(IDLE) // FSM state register
-
-  // accumulator logic
-  val sum = Wire(UInt(32.W))
-  sum := regFile.reduce(_ + _) // sum all valid registers
-
-  // write again because we need to let the memory settle
-  val wrCounter = RegInit(0.U(4.W))
 
   // FSM logic
   switch(state) {
     is(IDLE) {
       when(cmdQueue.valid && doAccum) {
         printf(cf"*ta*RoCC cmd recieved.Transition STORE_REQ_SETUP state.\n")
-        regIdx    := 0.U // reset register index
-        wrCounter := 0.U // reset write counter
+        regIdx := 0.U // reset register index
         regValid.foreach(_ := false.B) // reset register valid flags
         state := READ_REQ_SETUP // move to setup state
       }
@@ -72,7 +63,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
       when(regValid.reduce(_ && _)) {
         // all registers have valid data,
         // TODO: handle this case, CALC maybe?
-        state := STORE_REQ_SETUP
+        state := INST_COMPLETE
 
       }.otherwise {
         // latch request parameters
@@ -81,8 +72,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
         reqAddr := rgPtr + (regIdx << 2).asUInt // assuming 4-byte registers
         reqTag  := regIdx
         reqData := 0.U                          // do not care
-        reqCmd  := M_XRD                        // read command
-        state   := READ_REQ_FIRE                // move to fire state
+        state   := READ_REQ_FIRE               // move to fire state
 
       }
 
@@ -96,58 +86,32 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
     is(READ_REQ_RESP) {
       when(io.mem.resp.valid) {
         printf(cf"*ta*Memory response received for tag $memRespTag.\n")
-        regValid(memRespTag) := true.B                // mark the register as valid
-        regFile(memRespTag)  := io.mem.resp.bits.data // store the response data in the register file
-        regIdx               := regIdx + 1.U          // increment the register index
-        state                := READ_REQ_SETUP        // go back to setup state for next request
+        regValid(memRespTag) := true.B // mark the register as valid
+        regFile(memRespTag) := io.mem.resp.bits.data // store the response data in the register file
+        regIdx := regIdx + 1.U // increment the register index
+        state := READ_REQ_SETUP // go back to setup state for next request
       }
     }
-
-    // READ REQUESTS are done, now we can process the STORE REQUESTS
-    is(STORE_REQ_SETUP) {
-      when(wrCounter === 2.U) {
-        state := INST_COMPLETE // if we have written to 3 registers, we are done
-      }.otherwise {
-
-        printf(cf"*ta*Latching memory write request for address $rgWrPtr with data $sum.\n")
-        reqAddr := rgWrPtr
-        reqTag  := 0.U
-        reqData := sum
-        reqCmd  := M_XWR          // write command
-        state   := STORE_REQ_FIRE // move to fire state
-      }
-    }
-    is(STORE_REQ_FIRE) {
-      when(io.mem.req.fire) {
-        printf(cf"*ta*Firing memory request for register $reqTag at address $reqAddr with data $reqData.\n")
-        state := STORE_REQ_RESP // move to response state
-      }
-    }
-    is(STORE_REQ_RESP) {
-      when(io.mem.resp.valid) {
-        printf(cf"*ta*Memory response received for tag $memRespTag.\n")
-        wrCounter := wrCounter + 1.U // increment the write counter
-        state := STORE_REQ_SETUP // go back to setup state for next request
-      }
-    }
-
     is(INST_COMPLETE) {
-      printf(cf"*ta*Instruction complete.\n")
-      printf(cf"*ta*REGFILE: $regFile\n")
+      // perform any calculations for next store request
+      // testReg := testReg + 3.U // increment the test register
+      // printf(cf"*ta*Performing calculation, incremented test register to $testReg.\n")
+      printf(cf"*ta*Instruction complete, all registers processed.\n")
+      printf(cf"*ta*REGFILE: ${regFile}\n")
       state := IDLE // go back to idle state
     }
   }
 
-  // when(io.mem.req.fire) {
-  //   // printf(cf"*ta*MONITOR~Memory request sent for register $reqTag at address $reqAddr with data $reqData.\n")
-  // }
+  when(io.mem.req.fire) {
+    // printf(cf"*ta*MONITOR~Memory request sent for register $reqTag at address $reqAddr with data $reqData.\n")
+  }
 
 // Memory request interface
-  io.mem.req.valid        := (state === READ_REQ_FIRE) || (state === STORE_REQ_FIRE)
+  io.mem.req.valid        := (state === READ_REQ_FIRE) // memReqValid // && !busy
   io.mem.req.bits.addr    := reqAddr
   io.mem.req.bits.tag     := reqTag
-  io.mem.req.bits.cmd     := reqCmd
-  io.mem.req.bits.size    := log2Ceil(4).U // 32 -> max 65536
+  io.mem.req.bits.cmd     := M_XRD
+  io.mem.req.bits.size    := log2Ceil(4).U              // 32 -> max 65536
   io.mem.req.bits.signed  := false.B
   io.mem.req.bits.data    := reqData
   io.mem.req.bits.phys    := false.B
