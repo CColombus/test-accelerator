@@ -20,7 +20,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   // Define FSM states
   object FSMstate extends ChiselEnum {
     val IDLE, READ_REQ_SETUP, READ_REQ_FIRE, READ_REQ_RESP, STORE_REQ_SETUP, STORE_REQ_FIRE, STORE_REQ_RESP,
-        INST_COMPLETE = Value
+        SYNC_SETUP, SYNC_FIRE, SYNC_RESP, INST_COMPLETE = Value
   }
 
   import FSMstate._
@@ -46,6 +46,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   val reqTag  = Reg(UInt(4.W)) // or whatever width you need
   val reqData = Reg(UInt(32.W))
   val reqCmd  = RegInit(M_XRD) // default command is read
+  val reqSize = RegInit(2.U(4.W)) // default size is 4 bytes
 
   val state = RegInit(IDLE) // FSM state register
 
@@ -82,6 +83,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
         reqTag  := regIdx
         reqData := 0.U                          // do not care
         reqCmd  := M_XRD                        // read command
+        reqSize := 2.U
         state   := READ_REQ_FIRE                // move to fire state
 
       }
@@ -105,17 +107,13 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
 
     // READ REQUESTS are done, now we can process the STORE REQUESTS
     is(STORE_REQ_SETUP) {
-      when(wrCounter === 2.U) {
-        state := INST_COMPLETE // if we have written to 3 registers, we are done
-      }.otherwise {
-
         printf(cf"*ta*Latching memory write request for address $rgWrPtr with data $sum.\n")
         reqAddr := rgWrPtr
-        reqTag  := 0.U
+        reqTag  := 15.U
         reqData := sum
         reqCmd  := M_XWR          // write command
+        reqSize := 2.U
         state   := STORE_REQ_FIRE // move to fire state
-      }
     }
     is(STORE_REQ_FIRE) {
       when(io.mem.req.fire) {
@@ -125,9 +123,37 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
     }
     is(STORE_REQ_RESP) {
       when(io.mem.resp.valid) {
-        printf(cf"*ta*Memory response received for tag $memRespTag.\n")
-        wrCounter := wrCounter + 1.U // increment the write counter
-        state := STORE_REQ_SETUP // go back to setup state for next request
+        printf(cf"*ta*Memory write response received for tag $memRespTag.\n")
+        state := SYNC_SETUP // go back to setup state for next request
+      }
+    }
+
+    // Try reading back again to ensure the data is written
+    is(SYNC_SETUP) {
+      printf(cf"*ta*Latching memory SYNC request for address $rgWrPtr.\n")
+      reqAddr := rgWrPtr
+      reqTag  := 15.U
+      reqData := 0.U // do not care
+      reqCmd  := M_XRD // read command
+      reqSize := 2.U
+      state   := SYNC_FIRE // move to fire state
+    }
+    is(SYNC_FIRE) {
+      when(io.mem.req.fire) {
+        printf(cf"*ta*Firing memory read request for register $reqTag at address $reqAddr.\n")
+        state := SYNC_RESP // move to response state
+      }
+    }
+    is(SYNC_RESP) {
+      when(io.mem.resp.valid) {
+        printf(cf"*ta*Memory SYNC response received for tag $memRespTag with data ${io.mem.resp.bits.data}.\n")
+        // Check if the data matches the expected sum
+        when(io.mem.resp.bits.data === sum) {
+          printf(cf"*ta*Data verification successful. Sum matches expected value.\n")
+        }.otherwise {
+          printf(cf"*ta*Data verification failed. Expected $sum but got ${io.mem.resp.bits.data}.\n")
+        }
+        state := INST_COMPLETE // move to instruction complete state
       }
     }
 
@@ -143,11 +169,11 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   // }
 
 // Memory request interface
-  io.mem.req.valid        := (state === READ_REQ_FIRE) || (state === STORE_REQ_FIRE)
+  io.mem.req.valid        := (state === READ_REQ_FIRE) || (state === STORE_REQ_FIRE) || (state === SYNC_FIRE)
   io.mem.req.bits.addr    := reqAddr
   io.mem.req.bits.tag     := reqTag
   io.mem.req.bits.cmd     := reqCmd
-  io.mem.req.bits.size    := log2Ceil(4).U // 32 -> max 65536
+  io.mem.req.bits.size    := reqSize
   io.mem.req.bits.signed  := false.B
   io.mem.req.bits.data    := reqData
   io.mem.req.bits.phys    := false.B
