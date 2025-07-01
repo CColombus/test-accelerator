@@ -39,19 +39,6 @@ class ILOG extends Module {
   io.out := Mux(zeroCase, -1.S, res)
 }
 
-class FixMult64 extends Module {
-  val io = IO(new Bundle {
-    val ina = Input(SInt(64.W))  // Q1.63
-    val inb = Input(SInt(64.W))  // Q1.63
-    val out = Output(SInt(64.W)) // Q1.63
-  })
-
-  // The result of multiplying two Q1.63 numbers is Q2.126
-  val mult_temp = Wire(SInt(128.W))
-  mult_temp := io.ina * io.inb
-
-  io.out := Mux(io.ina === 0.S || io.inb === 0.S, 0.S, (mult_temp >> 32).asSInt)
-}
 
 class TestAccelerator(opcodes: OpcodeSet, val n: Int = 4)(implicit p: Parameters) extends LazyRoCC(opcodes) {
   override lazy val module = new TestAcceleratorModule(this)
@@ -105,18 +92,16 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   val addrOfBaseX = RegInit(0.U(32.W)) // base address of the anchor array
 
   // Param loading logic
-  val constParamCount   = 7
+  val constParamCount   = 5
   val addrOfParamsArray = RegInit(0.U(32.W))                    // base address of the parameter array
   val regParams         = Reg(Vec(constParamCount, SInt(64.W))) // register array for parameters
   val regFillCounter    = RegInit(0.U(5.W))                     // counter for filling parameters
 
-  val P_is_cdna   = regParams(0)
-  val p_ri        = regParams(1)
-  val p_qi        = regParams(2)
-  val p_qspan     = regParams(3)
-  val p_sidi      = regParams(4)
-  val p_avg_qspan = regParams(5)
-  val p_gap_scale = regParams(6)
+  val P_is_cdna = regParams(0)
+  val p_ri      = regParams(1)
+  val p_qi      = regParams(2)
+  val p_qspan   = regParams(3)
+  val p_sidi    = regParams(4)
 
   // Calculate one J logic
   val idx_j         = RegInit(0.U(32.W))  // index for J
@@ -141,23 +126,6 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   val f_ilog32 = Module(new ILOG) // instantiate the ILOG module
   f_ilog32.io.in := v_dd(31, 0).asSInt // input to the ILOG module is the lower 32 bits of V_dd
   val v_log_dd = Mux(v_dd > 0.S, f_ilog32.io.out, 0.S)
-
-  val scale       = BigInt(1) << 32
-  val scaleSInt   = scale.S(64.W)
-  val scale01     = (0.01 * scale.toDouble).toLong
-  val scale01SInt = scale01.S(64.W)
-
-  val v_gap_cost  = Wire(SInt(64.W))
-  val f_mult64_u1 = Module(new FixMult64) // instantiate the fixed-point multiplier
-  val f_mult64_u2 = Module(new FixMult64) // instantiate the fixed-point multiplier
-
-  f_mult64_u1.io.ina := v_dd * scaleSInt
-  f_mult64_u1.io.inb := scale01SInt
-
-  f_mult64_u2.io.ina := f_mult64_u1.io.out
-  f_mult64_u2.io.inb := p_avg_qspan
-
-  v_gap_cost := f_mult64_u2.io.out + ((v_log_dd >> 1) * scaleSInt)
 
   // FSM logic
   switch(state) {
@@ -301,13 +269,11 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
     is(COJ_CALCULATION) {
       // perform the calculation for one J
       // printf(cf"*ta*Performing calculation for J with idx $idx_j.\n")
-      printf(cf"*ta*a[j].x: $v_a_j_x, a[j].y: $v_a_j_y, dr: $v_dr, dq: $v_dq, sidj: $v_sidj.\n")
-      printf(
-        cf"*ta*dd: $v_dd, min_dq: $v_min_dq, sc_1: $v_sc_1, log_dd: $v_log_dd, gap_cost: $v_gap_cost.\n"
-      )
+      printf(cf"*ta*a[j].x: ${v_a_j_x}, a[j].y: $v_a_j_y, dr: $v_dr, dq: $v_dq, sidj: $v_sidj.\n")
+      printf(cf"*ta*dd: $v_dd, min_dq: $v_min_dq, sc_1: $v_sc_1, log_dd: $v_log_dd.\n")
 
       // Here you can add more calculations or logic as needed
-      respData := v_gap_cost.asUInt // set the response data to the log value
+      respData := v_log_dd.asUInt // set the response data to the log value
       state    := INST_COMPLETE   // move to instruction complete state
     }
 
