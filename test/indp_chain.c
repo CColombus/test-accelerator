@@ -426,6 +426,9 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
         sum_qspan += a[i].y >> 32 & 0xff;
     avg_qspan = (float)sum_qspan / n;
 
+    // printf("avg_qspan = %.2f\n", avg_qspan);
+    // printf("gap_scale = %.2f\n", gap_scale);
+
     // fill the score and backtrack arrays
     for (i = 0; i < n; ++i)
     {
@@ -456,7 +459,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
             sc = min_d > q_span ? q_span : dq < dr ? dq : dr;
             log_dd = dd ? ilog2_32(dd) : 0;
             gap_cost = 0;
-            if (is_cdna || sidi != sidj)
+            if (0 && is_cdna || sidi != sidj)
             {
                 int c_log, c_lin;
                 c_lin = (int)(dd * .01 * avg_qspan);
@@ -470,6 +473,8 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
             }
             else
                 gap_cost = (int)(dd * .01 * avg_qspan) + (log_dd >> 1);
+
+            printf("gap_cost = %d\n", gap_cost);
             sc -= (int)((double)gap_cost * gap_scale + .499);
             sc += f[j];
             if (sc > max_f)

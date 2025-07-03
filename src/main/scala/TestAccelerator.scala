@@ -41,16 +41,15 @@ class ILOG extends Module {
 
 class FixMult64 extends Module {
   val io = IO(new Bundle {
-    val ina = Input(SInt(64.W))  // Q1.63
-    val inb = Input(SInt(64.W))  // Q1.63
-    val out = Output(SInt(64.W)) // Q1.63
+    val ina = Input(SInt(64.W))
+    val inb = Input(SInt(64.W))
+    val out = Output(SInt(64.W))
   })
 
-  // The result of multiplying two Q1.63 numbers is Q2.126
   val mult_temp = Wire(SInt(128.W))
   mult_temp := io.ina * io.inb
 
-  io.out := Mux(io.ina === 0.S || io.inb === 0.S, 0.S, (mult_temp >> 32).asSInt)
+  io.out := (mult_temp >> 32).asSInt
 }
 
 class TestAccelerator(opcodes: OpcodeSet, val n: Int = 4)(implicit p: Parameters) extends LazyRoCC(opcodes) {
@@ -144,15 +143,13 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
 
   val scale       = BigInt(1) << 32
   val scaleSInt   = scale.S(64.W)
-  val scale01     = (0.01 * scale.toDouble).toLong
-  val scale01SInt = scale01.S(64.W)
 
   val v_gap_cost  = Wire(SInt(64.W))
   val f_mult64_u1 = Module(new FixMult64) // instantiate the fixed-point multiplier
   val f_mult64_u2 = Module(new FixMult64) // instantiate the fixed-point multiplier
 
   f_mult64_u1.io.ina := v_dd * scaleSInt
-  f_mult64_u1.io.inb := scale01SInt
+  f_mult64_u1.io.inb := (0.01 * scale.toDouble).toLong.S
 
   f_mult64_u2.io.ina := f_mult64_u1.io.out
   f_mult64_u2.io.inb := p_avg_qspan
@@ -233,6 +230,9 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
         // we have filled all the registers
         printf(cf"*ta*Loaded all parameters into registers.\n")
         printf(cf"*ta*Register parameters: $regParams.\n")
+        // print p_avg_qspan and p_gap_scale
+        printf(cf"*ta*p_avg_qspan: ${p_avg_qspan}, p_gap_scale: ${p_gap_scale}.\n")
+        // set the response data to the first parameter
         state := INST_COMPLETE
 
       }.otherwise {
@@ -308,7 +308,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
 
       // Here you can add more calculations or logic as needed
       respData := v_gap_cost.asUInt // set the response data to the log value
-      state    := INST_COMPLETE   // move to instruction complete state
+      state    := INST_COMPLETE     // move to instruction complete state
     }
 
     is(INST_COMPLETE) {

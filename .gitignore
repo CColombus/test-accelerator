@@ -32,3 +32,14 @@ target/*
 
 # End of https://www.toptal.com/developers/gitignore/api/scala,visualstudiocode
 .vscode/settings.json
+
+CMakeCache.txt
+CMakeCache.txt
+**/CMakeFiles/
+Makefile
+cmake_install.cmake
+*.o
+*.riscv
+*.dump
+*.img
+libgloss/
