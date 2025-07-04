@@ -41,15 +41,22 @@ class ILOG extends Module {
 
 class FixMult64 extends Module {
   val io = IO(new Bundle {
-    val ina = Input(SInt(64.W))
-    val inb = Input(SInt(64.W))
-    val out = Output(SInt(64.W))
+    val ina         = Input(SInt(64.W))
+    val inb         = Input(SInt(64.W))
+    val out         = Output(SInt(64.W))
+    val out_rounded = Output(SInt(64.W)) // Rounded to nearest integer
   })
 
   val mult_temp = Wire(SInt(128.W))
   mult_temp := io.ina * io.inb
 
   io.out := (mult_temp >> 32).asSInt
+
+  // Add 0.5 to the product for rounding (rounding to nearest)
+  // Now truncates to the nearest integer
+  val half         = (BigInt(1) << 63).S(128.W)
+  val rounded_temp = mult_temp + half
+  io.out_rounded := (rounded_temp >> 64).asSInt
 }
 
 class TestAccelerator(opcodes: OpcodeSet, val n: Int = 4)(implicit p: Parameters) extends LazyRoCC(opcodes) {
@@ -80,7 +87,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   // datapath
   val cmdRs1   = cmdQueue.bits.rs1
   val cmdRs2   = cmdQueue.bits.rs2
-  val respData = RegInit(0.U(32.W)) // response data to be sent back to the processor
+  val respData = RegInit(0.U(64.W)) // response data to be sent back to the processor
 
   val memRespTag = io.mem.resp.bits.tag(3, 0) // tag for the memory response
 
@@ -109,7 +116,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   val regParams         = Reg(Vec(constParamCount, SInt(64.W))) // register array for parameters
   val regFillCounter    = RegInit(0.U(5.W))                     // counter for filling parameters
 
-  val P_is_cdna   = regParams(0)
+  val p_is_cdna   = regParams(0)
   val p_ri        = regParams(1)
   val p_qi        = regParams(2)
   val p_qspan     = regParams(3)
@@ -127,7 +134,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   val v_a_j_y = regAJset(1) // y coordinate of AJset
 
   val v_dr = Wire(SInt(64.W))
-  v_dr := p_ri - v_a_j_x
+  v_dr := p_ri - v_a_j_x + 20.S // TODO: +20 is only for testing purposes
   val v_dq = Wire(SInt(64.W))
   v_dq := p_qi - v_a_j_y(31, 0).asSInt
   val v_sidj = Wire(SInt(8.W))
@@ -141,10 +148,9 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   f_ilog32.io.in := v_dd(31, 0).asSInt // input to the ILOG module is the lower 32 bits of V_dd
   val v_log_dd = Mux(v_dd > 0.S, f_ilog32.io.out, 0.S)
 
-  val scale       = BigInt(1) << 32
-  val scaleSInt   = scale.S(64.W)
+  val scale     = BigInt(1) << 32
+  val scaleSInt = scale.S(64.W)
 
-  val v_gap_cost  = Wire(SInt(64.W))
   val f_mult64_u1 = Module(new FixMult64) // instantiate the fixed-point multiplier
   val f_mult64_u2 = Module(new FixMult64) // instantiate the fixed-point multiplier
 
@@ -154,7 +160,51 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
   f_mult64_u2.io.ina := f_mult64_u1.io.out
   f_mult64_u2.io.inb := p_avg_qspan
 
-  v_gap_cost := f_mult64_u2.io.out + ((v_log_dd >> 1) * scaleSInt)
+  // IF BLOCK
+
+  val v_c_lin = f_mult64_u2.io.out_rounded
+  val v_c_log = v_log_dd
+
+  // here gap_cost is implicitly 0, look at first when() block
+  val v_sc_2 = Mux((p_sidi =/= v_sidj) & (v_dr === 0.S), 1.S, 0.S)
+
+  val v_gap_cost_1 = Mux((v_c_lin < v_c_log), v_c_lin, v_c_log)
+
+  val v_gap_cost_2 = v_c_lin + (v_c_log >> 1)
+
+  // Inside is_cdna block, switch to decide on gap_cost
+  val v_gap_cost_top = Wire(SInt(64.W))
+
+  when((p_sidi =/= v_sidj) & (v_dr === 0.S)) {
+    v_gap_cost_top := 0.S
+  }.elsewhen((p_sidi =/= v_sidj) | (v_dr > v_dq)) {
+    v_gap_cost_top := v_gap_cost_1
+  }.otherwise {
+    v_gap_cost_top := v_gap_cost_2
+  }
+
+  // ELSE BLOCK
+
+  // gap_cost calulation does integer rounding
+  // thus we can also drop fixed-point precision
+  val v_gap_cost_down = v_c_lin + (v_log_dd >> 1)
+
+  // END OF ELSE BLOCK
+
+  val v_gap_cost_final = Wire(SInt(64.W))
+  v_gap_cost_final := Mux((p_is_cdna =/= 0.S) | (p_sidi =/= v_sidj), v_gap_cost_top, v_gap_cost_down)
+
+  val v_sc_pre = v_sc_1 + v_sc_2 // intermediate sc value before actual sc calculation
+
+  val f_mult64_u3 = Module(new FixMult64)
+  f_mult64_u3.io.ina := v_gap_cost_final * scaleSInt
+  f_mult64_u3.io.inb := p_gap_scale
+
+  val v_before_trunc = f_mult64_u3.io.out + (0.499 * scale.toDouble).toLong.S
+  val v_after_trunc  = (v_before_trunc >> 64).asSInt
+
+  val v_sc_final = Wire(SInt(64.W))
+  v_sc_final := v_sc_pre - v_after_trunc
 
   // FSM logic
   switch(state) {
@@ -231,7 +281,7 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
         printf(cf"*ta*Loaded all parameters into registers.\n")
         printf(cf"*ta*Register parameters: $regParams.\n")
         // print p_avg_qspan and p_gap_scale
-        printf(cf"*ta*p_avg_qspan: ${p_avg_qspan}, p_gap_scale: ${p_gap_scale}.\n")
+        printf(cf"*ta*p_avg_qspan: $p_avg_qspan, p_gap_scale: $p_gap_scale.\n")
         // set the response data to the first parameter
         state := INST_COMPLETE
 
@@ -303,12 +353,12 @@ class TestAcceleratorModule(outer: TestAccelerator)(implicit p: Parameters)
       // printf(cf"*ta*Performing calculation for J with idx $idx_j.\n")
       printf(cf"*ta*a[j].x: $v_a_j_x, a[j].y: $v_a_j_y, dr: $v_dr, dq: $v_dq, sidj: $v_sidj.\n")
       printf(
-        cf"*ta*dd: $v_dd, min_dq: $v_min_dq, sc_1: $v_sc_1, log_dd: $v_log_dd, gap_cost: $v_gap_cost.\n"
+        cf"*ta* log_dd: $v_log_dd, gap_cost: $v_gap_cost_final, sc: $v_sc_final\n"
       )
 
       // Here you can add more calculations or logic as needed
-      respData := v_gap_cost.asUInt // set the response data to the log value
-      state    := INST_COMPLETE     // move to instruction complete state
+      respData := v_sc_final.asUInt
+      state    := INST_COMPLETE // move to instruction complete state
     }
 
     is(INST_COMPLETE) {

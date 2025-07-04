@@ -426,8 +426,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
         sum_qspan += a[i].y >> 32 & 0xff;
     avg_qspan = (float)sum_qspan / n;
 
-    // printf("avg_qspan = %.2f\n", avg_qspan);
-    // printf("gap_scale = %.2f\n", gap_scale);
+    printf("avg_qspan = %.2f\n", avg_qspan);
 
     // fill the score and backtrack arrays
     for (i = 0; i < n; ++i)
@@ -443,23 +442,26 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
             st = i - max_iter;
         for (j = i - 1; j >= st; --j)
         {
-            int64_t dr = ri - a[j].x;
+            printf("a[%ld].x = %ld, a[%ld].y = %ld\n", j, a[j].x, j, a[j].y);
+            printf("ri = %ld, qi = %d\n", ri, qi);
+
+            int64_t dr = ri - a[j].x + 20;
             int32_t dq = qi - (int32_t)a[j].y, dd, sc, log_dd, gap_cost;
             int32_t sidj = (a[j].y & MM_SEED_SEG_MASK) >> MM_SEED_SEG_SHIFT;
-            if ((sidi == sidj && dr == 0) || dq <= 0)
-                continue; // don't skip if an anchor is used by multiple segments; see below
-            if ((sidi == sidj && dq > max_dist_y) || dq > max_dist_x)
-                continue;
+            // if ((sidi == sidj && dr == 0) || dq <= 0)
+            //     continue; // don't skip if an anchor is used by multiple segments; see below
+            // if ((sidi == sidj && dq > max_dist_y) || dq > max_dist_x)
+            //     continue;
             dd = dr > dq ? dr - dq : dq - dr;
-            if (sidi == sidj && dd > bw)
-                continue;
-            if (n_segs > 1 && !is_cdna && sidi == sidj && dr > max_dist_y)
-                continue;
+            // if (sidi == sidj && dd > bw)
+            //     continue;
+            // if (n_segs > 1 && !is_cdna && sidi == sidj && dr > max_dist_y)
+            //     continue;
             min_d = dq < dr ? dq : dr;
             sc = min_d > q_span ? q_span : dq < dr ? dq : dr;
             log_dd = dd ? ilog2_32(dd) : 0;
             gap_cost = 0;
-            if (0 && is_cdna || sidi != sidj)
+            if (is_cdna || sidi != sidj)
             {
                 int c_log, c_lin;
                 c_lin = (int)(dd * .01 * avg_qspan);
@@ -474,8 +476,11 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
             else
                 gap_cost = (int)(dd * .01 * avg_qspan) + (log_dd >> 1);
 
-            printf("gap_cost = %d\n", gap_cost);
+            // printf("gap_cost = %d\n", gap_cost);
             sc -= (int)((double)gap_cost * gap_scale + .499);
+
+            printf("sc = %d\n", sc);
+
             sc += f[j];
             if (sc > max_f)
             {

@@ -427,6 +427,10 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
     sum_qspan = ROCC_SUM_QSPAN(a, n);
     avg_qspan = (float)sum_qspan / n;
 
+    int avg_qspan_int = (int)avg_qspan;
+    int avg_qspan_frac = (int)((avg_qspan - avg_qspan_int) * 100);
+    printf("avg_qspan = %d.%02d\n", avg_qspan_int, avg_qspan_frac);
+
     // fill the score and backtrack arrays
     for (i = 0; i < n; ++i)
     {
@@ -466,7 +470,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
             printf("from_q32_32(result) = %f\n", from_q32_32(result));
 
 
-            int64_t dr = ri - a[j].x;
+            int64_t dr = ri - a[j].x + 20;
             int32_t dq = qi - (int32_t)a[j].y, dd, sc, log_dd, gap_cost;
             int32_t sidj = (a[j].y & MM_SEED_SEG_MASK) >> MM_SEED_SEG_SHIFT;
 
@@ -502,7 +506,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
             else
                 gap_cost = (int)(dd * .01 * avg_qspan) + (log_dd >> 1);
 
-            printf("i=%ld, j=%ld, dr=%ld, dq=%d, sidj=%d, dd=%d, min_d=%d, sc=%d, log_dd=%d, gap_cost=%d\n\n", i, j, dr, dq, sidj, dd, min_d, sc, log_dd, gap_cost);
+            // printf("i=%ld, j=%ld, dr=%ld, dq=%d, sidj=%d, dd=%d, min_d=%d, sc=%d, log_dd=%d, gap_cost=%d\n\n", i, j, dr, dq, sidj, dd, min_d, sc, log_dd, gap_cost);
 
             sc -= (int)((double)gap_cost * gap_scale + .499);
             sc += f[j];

@@ -75,7 +75,7 @@ add_executable(acc_indp_chain acc_indp_chain.c)
 #################################
 
 # Add a target to generate all disassemblies
-add_custom_target(dump ALL)
+# add_custom_target(dump ALL)
 
 # Function to add disassembly target for an executable
 function(add_dump_target target_name)
@@ -89,35 +89,35 @@ function(add_dump_target target_name)
     add_dependencies(dump ${target_name}-dump)
 endfunction()
 
-add_dump_target(pwm)
-add_dump_target(blkdev)
-add_dump_target(accum)
-add_dump_target(charcount)
-add_dump_target(cpp-hello)
-add_dump_target(nic-loopback)
-add_dump_target(big-blkdev)
-add_dump_target(pingd)
-add_dump_target(streaming-passthrough)
-add_dump_target(streaming-fir)
-add_dump_target(nvdla)
-add_dump_target(spiflashread)
-add_dump_target(spiflashwrite)
-add_dump_target(fft)
-add_dump_target(gcd)
-add_dump_target(hello)
-add_dump_target(mt-hello)
-add_dump_target(symmetric)
+# add_dump_target(pwm)
+# add_dump_target(blkdev)
+# add_dump_target(accum)
+# add_dump_target(charcount)
+# add_dump_target(cpp-hello)
+# add_dump_target(nic-loopback)
+# add_dump_target(big-blkdev)
+# add_dump_target(pingd)
+# add_dump_target(streaming-passthrough)
+# add_dump_target(streaming-fir)
+# add_dump_target(nvdla)
+# add_dump_target(spiflashread)
+# add_dump_target(spiflashwrite)
+# add_dump_target(fft)
+# add_dump_target(gcd)
+# add_dump_target(hello)
+# add_dump_target(mt-hello)
+# add_dump_target(symmetric)
 
 
 # Add custom command to generate spiflash.img from spiflash.py
-add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/spiflash.img
-    COMMAND python3 ${CMAKE_SOURCE_DIR}/spiflash.py --outfile ${CMAKE_SOURCE_DIR}/spiflash.img
-    DEPENDS ${CMAKE_SOURCE_DIR}/spiflash.py
-    COMMENT "Generating spiflash.img"
-)
+# add_custom_command(
+#     OUTPUT ${CMAKE_BINARY_DIR}/spiflash.img
+#     COMMAND python3 ${CMAKE_SOURCE_DIR}/spiflash.py --outfile ${CMAKE_SOURCE_DIR}/spiflash.img
+#     DEPENDS ${CMAKE_SOURCE_DIR}/spiflash.py
+#     COMMENT "Generating spiflash.img"
+# )
 
-# Add a target for spiflash.img
-add_custom_target(spiflash_img ALL
-    DEPENDS ${CMAKE_BINARY_DIR}/spiflash.img
-)
+# # Add a target for spiflash.img
+# add_custom_target(spiflash_img ALL
+#     DEPENDS ${CMAKE_BINARY_DIR}/spiflash.img
+# )
